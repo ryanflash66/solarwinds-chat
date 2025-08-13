@@ -1,0 +1,28 @@
+# Development Docker Compose - extends the main compose with development settings
+version: '3.8'
+
+services:
+  # Development overrides for API service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - ENABLE_MOCK_DATA=true
+      - MOCK_SOLUTIONS_COUNT=25
+    volumes:
+      - .:/app  # Mount source code for live reloading
+      - /app/.venv  # Exclude virtual environment from mount
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    
+  # Development overrides for frontend service  
+  frontend:
+    volumes:
+      - .:/app
+      - /app/.venv
+    environment:
+      - API_BASE_URL=http://api:8000
+    command: ["python", "-m", "streamlit", "run", "streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true", "--server.fileWatcherType", "poll"]

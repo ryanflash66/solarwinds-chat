@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     solarwinds_api_key: Optional[str] = Field(default=None, description="SolarWinds API key")
     solarwinds_base_url: Optional[str] = Field(default=None, description="SolarWinds base URL")
     solarwinds_rate_limit: int = Field(default=10, description="SolarWinds API rate limit per minute")
+    
+    # Development/Testing Settings
+    enable_mock_data: bool = Field(default=True, description="Enable mock data for development")
+    mock_solutions_count: int = Field(default=25, description="Number of mock solutions to generate")
 
     # Vector Store Settings
     chroma_host: str = Field(default="localhost", description="Chroma host")
@@ -44,7 +48,7 @@ class Settings(BaseSettings):
     
     # OpenRouter Settings (when llm_provider=openrouter)
     openrouter_api_key: Optional[str] = Field(default=None, description="OpenRouter API key")
-    openrouter_model: str = Field(default="anthropic/claude-3-sonnet", description="OpenRouter model")
+    openrouter_model: str = Field(default="meta-llama/llama-3.1-8b-instruct:free", description="OpenRouter model")
     
     # Local LLM Settings (when llm_provider=local)
     ollama_base_url: str = Field(default="http://localhost:11434", description="OLLAMA base URL")
@@ -56,9 +60,10 @@ class Settings(BaseSettings):
     embedding_model: str = Field(default="text-embedding-3-small", description="Embedding model name")
     embedding_dimension: int = Field(default=1536, description="Embedding dimension")
 
-    # Redis Settings
+    # Redis Settings (optional - falls back to in-memory storage)
     redis_url: str = Field(default="redis://localhost:6379", description="Redis connection URL")
     redis_db: int = Field(default=0, description="Redis database number")
+    redis_enabled: bool = Field(default=True, description="Enable Redis for caching and state management")
 
     # Background Job Settings
     sync_interval_minutes: int = Field(default=5, description="SolarWinds sync interval in minutes")

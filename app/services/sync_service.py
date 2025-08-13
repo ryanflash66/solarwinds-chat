@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.services.solarwinds import solarwinds_service
 from app.services.text_processing import text_processing_service
 from app.services.indexing_service import indexing_service
+from app.services.mock_data import mock_data_service
 
 logger = get_logger(__name__)
 
@@ -276,6 +277,11 @@ class SyncService:
         try:
             logger.info("Starting SolarWinds sync")
             
+            # Check if we should use mock data
+            if mock_data_service.is_mock_mode_enabled():
+                logger.info("Using mock data for development (SolarWinds API not configured)")
+                return await self._sync_mock_data(sync_start_time)
+            
             # Get last sync time for delta sync
             last_sync_time = await self.state_manager.get_last_sync_time()
             
@@ -389,6 +395,61 @@ class SyncService:
             
         except Exception as e:
             logger.error(f"Error in cleanup job: {str(e)}")
+    
+    async def _sync_mock_data(self, sync_start_time: datetime) -> Dict[str, Any]:
+        """Sync mock data for development."""
+        try:
+            logger.info("Generating and indexing mock solutions")
+            
+            # Generate mock solutions
+            mock_solutions = mock_data_service.generate_mock_solutions()
+            
+            if not mock_solutions:
+                logger.warning("No mock solutions generated")
+                return {
+                    "status": "success",
+                    "solutions_processed": 0,
+                    "duration_seconds": (datetime.utcnow() - sync_start_time).total_seconds(),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "mode": "mock",
+                }
+            
+            # Index solutions in vector database
+            logger.info(f"Indexing {len(mock_solutions)} mock solutions")
+            indexing_result = await indexing_service.index_solutions_batch(mock_solutions)
+            
+            successful_count = indexing_result.get("indexed", 0)
+            failed_count = indexing_result.get("failed", 0) + indexing_result.get("skipped", 0)
+            
+            # Update sync state
+            await self.state_manager.set_last_sync_time(sync_start_time)
+            
+            # Update statistics
+            duration = (datetime.utcnow() - sync_start_time).total_seconds()
+            stats = {
+                "total_solutions": len(mock_solutions),
+                "successful_count": successful_count,
+                "failed_count": failed_count,
+                "duration_seconds": duration,
+                "last_sync_time": sync_start_time.isoformat(),
+                "mode": "mock",
+            }
+            await self.state_manager.update_sync_stats(stats)
+            
+            logger.info(f"Mock sync completed: {successful_count} indexed, {failed_count} failed")
+            
+            return {
+                "status": "success",
+                "solutions_processed": successful_count,
+                "failed_count": failed_count,
+                "duration_seconds": duration,
+                "timestamp": datetime.utcnow().isoformat(),
+                "mode": "mock",
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in mock data sync: {str(e)}")
+            raise
     
     async def get_sync_status(self) -> Dict[str, Any]:
         """Get current sync status."""
