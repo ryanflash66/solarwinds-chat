@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  # SolarWinds IT Solutions Chatbot - FastAPI Backend
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: solarwinds-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - LLM_PROVIDER=openrouter
+      - EMBEDDING_PROVIDER=local
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - REDIS_URL=redis://redis:6379
+      - REDIS_DB=0
+      - REDIS_ENABLED=true
+      - ENABLE_MOCK_DATA=true
+      - MOCK_SOLUTIONS_COUNT=50
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./logs:/app/logs
+    depends_on:
+      - chromadb
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - solarwinds-network
+
+  # Streamlit Frontend
+  frontend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: solarwinds-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://api:8000
+    command: ["python", "-m", "streamlit", "run", "streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true"]
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - solarwinds-network
+
+  # ChromaDB Vector Database
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: solarwinds-chromadb
+    ports:
+      - "8001:8000"
+    environment:
+      - CHROMA_HOST=0.0.0.0
+      - CHROMA_PORT=8000
+      - ANONYMIZED_TELEMETRY=false
+      - ALLOW_RESET=true
+    volumes:
+      - chroma-data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - solarwinds-network
+
+  # Redis Cache and State Management
+  redis:
+    image: redis:7-alpine
+    container_name: solarwinds-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - solarwinds-network
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+volumes:
+  chroma-data:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  solarwinds-network:
+    driver: bridge
+    name: solarwinds-network
