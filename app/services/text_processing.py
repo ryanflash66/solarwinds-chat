@@ -2,12 +2,26 @@
 
 import re
 import asyncio
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
-from unstructured.partition.auto import partition
-from unstructured.cleaners.core import clean_extra_whitespace, clean_non_ascii_chars
-from unstructured.staging.base import convert_to_dict
+try:
+    from unstructured.partition.auto import partition
+    from unstructured.cleaners.core import (
+        clean_extra_whitespace,
+        clean_non_ascii_chars,
+    )
+except ImportError:  # pragma: no cover - optional dependency in tests
+    partition = None  # type: ignore[assignment]
+    clean_extra_whitespace = None  # type: ignore[assignment]
+    clean_non_ascii_chars = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:  # pragma: no cover
+    from unstructured.partition.auto import partition as _partition
+    from unstructured.cleaners.core import (
+        clean_extra_whitespace as _clean_extra_whitespace,
+        clean_non_ascii_chars as _clean_non_ascii_chars,
+    )
 
 from app.core.logging import get_logger
 
@@ -63,14 +77,21 @@ class TextProcessingService:
     def _process_content_sync(self, content: str, title: str = "") -> str:
         """
         Synchronous content processing using Unstructured.
-        
+
         Args:
             content: Raw content to process
             title: Title for context
-            
+
         Returns:
             Cleaned content
         """
+        if not partition or not clean_extra_whitespace or not clean_non_ascii_chars:
+            logger.warning(
+                "Unstructured dependency not available; falling back to basic text cleaning",
+                extra={"title": title},
+            )
+            return self._basic_text_cleaning(content)
+
         try:
             # Try to partition the content using Unstructured
             elements = partition(text=content)

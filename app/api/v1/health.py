@@ -47,44 +47,101 @@ async def health_check() -> HealthResponse:
     uptime = current_time - _start_time
     
     # Check system components
-    components = {
+    components: Dict[str, Any] = {
         "api": {"status": "healthy", "message": "API is operational"},
         "config": {"status": "healthy", "message": "Configuration loaded successfully"},
         "logging": {"status": "healthy", "message": "Logging system operational"},
     }
-    
-    # Check optional services
+
+    # Indexing and embedding services
     try:
         from app.services.indexing_service import indexing_service
-        health_check = await indexing_service.health_check()
-        components["vector_store"] = {"status": "healthy", "message": "Vector store operational"}
-        components["embeddings"] = {"status": "healthy", "message": "Embedding service operational"}
-    except Exception as e:
-        components["vector_store"] = {"status": "unhealthy", "message": f"Vector store error: {str(e)}"}
-    
+
+        stats = await indexing_service.get_index_stats()
+        health = await indexing_service.health_check()
+
+        if stats.get("initialized") and health.get("healthy"):
+            components["vector_store"] = {
+                "status": "healthy",
+                "message": "Vector store operational",
+            }
+            components["embedding_service"] = {
+                "status": "healthy",
+                "message": "Embedding service operational",
+            }
+        else:
+            error_message = health.get("error") or stats.get("error") or "Service not initialized"
+            components["vector_store"] = {
+                "status": "degraded",
+                "message": error_message,
+            }
+            components["embedding_service"] = {
+                "status": "degraded",
+                "message": error_message,
+            }
+    except Exception as exc:
+        message = str(exc)
+        components["vector_store"] = {
+            "status": "unhealthy",
+            "message": f"Vector store error: {message}",
+        }
+        components["embedding_service"] = {
+            "status": "unhealthy",
+            "message": f"Embedding error: {message}",
+        }
+
+    # LLM provider
     try:
         from app.services.llm import llm_service
-        llm_health = await llm_service.health_check()
-        components["llm"] = llm_health
-    except Exception as e:
-        components["llm"] = {"status": "unhealthy", "message": f"LLM service error: {str(e)}"}
-    
+
+        llm_status = await llm_service.health_check()
+        components["llm_service"] = {
+            "status": llm_status.get("status", "unknown"),
+            "message": llm_status.get("error")
+            or f"Provider: {llm_status.get('provider', 'unknown')}",
+        }
+    except Exception as exc:
+        components["llm_service"] = {
+            "status": "unhealthy",
+            "message": f"LLM service error: {str(exc)}",
+        }
+
+    # Sync service
     try:
         from app.services.sync_service import sync_service
-        sync_status = sync_service.get_sync_status()
-        components["sync_service"] = {"status": "healthy", "message": "Sync service operational"}
-    except Exception as e:
-        components["sync_service"] = {"status": "unhealthy", "message": f"Sync service error: {str(e)}"}
-    
+
+        sync_status = await sync_service.get_sync_status()
+        components["sync_service"] = {
+            "status": "healthy" if sync_status.get("service_running") else "degraded",
+            "message": "Sync service running"
+            if sync_status.get("service_running")
+            else "Sync service not running",
+        }
+    except Exception as exc:
+        components["sync_service"] = {
+            "status": "unhealthy",
+            "message": f"Sync service error: {str(exc)}",
+        }
+
+    # SolarWinds API configuration
     try:
         from app.services.solarwinds import solarwinds_service
-        # Only test if configured
-        if hasattr(solarwinds_service, 'api_client') and solarwinds_service.api_client:
-            components["solarwinds"] = {"status": "healthy", "message": "SolarWinds API configured"}
+
+        if getattr(solarwinds_service, "client", None) and solarwinds_service.client.api_key:
+            components["solarwinds_api"] = {
+                "status": "healthy",
+                "message": "SolarWinds API configured",
+            }
         else:
-            components["solarwinds"] = {"status": "disabled", "message": "SolarWinds API not configured (development)"}
-    except Exception as e:
-        components["solarwinds"] = {"status": "unhealthy", "message": f"SolarWinds error: {str(e)}"}
+            components["solarwinds_api"] = {
+                "status": "disabled",
+                "message": "SolarWinds API not configured",
+            }
+    except Exception as exc:
+        components["solarwinds_api"] = {
+            "status": "unhealthy",
+            "message": f"SolarWinds error: {str(exc)}",
+        }
     
     logger.info("Health check requested", extra={
         "uptime_seconds": uptime,

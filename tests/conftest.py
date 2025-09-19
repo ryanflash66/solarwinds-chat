@@ -1,10 +1,21 @@
 """Test configuration and fixtures for the SolarWinds IT Solutions Chatbot."""
 
+import os
 import asyncio
+
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
+
+# Ensure tests use lightweight providers that avoid optional native dependencies
+os.environ.setdefault("LLM_PROVIDER", "openrouter")
+os.environ.setdefault("EMBEDDING_PROVIDER", "openai")
+os.environ.setdefault("OPENAI_API_KEY", "test-key")
+os.environ.setdefault("SOLARWINDS_OFFLINE_MODE", "true")
+os.environ["DEBUG"] = "false"
+os.environ["LOG_LEVEL"] = "INFO"
+os.environ["REDIS_ENABLED"] = "false"
 
 from app.main import app
 from app.core.config import settings
@@ -28,7 +39,8 @@ def client():
 @pytest_asyncio.fixture
 async def async_client():
     """Create an async test client for the FastAPI application."""
-    async with AsyncClient(app=app, base_url="http://test") as async_test_client:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as async_test_client:
         yield async_test_client
 
 

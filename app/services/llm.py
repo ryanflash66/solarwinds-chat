@@ -2,14 +2,25 @@
 
 import asyncio
 import json
+import os
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, AsyncGenerator
+from typing import Dict, List, Optional, Any, AsyncGenerator, TYPE_CHECKING
 from enum import Enum
 
 import httpx
-import ollama
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+try:
+    import ollama
+except ImportError:  # pragma: no cover - optional dependency in tests
+    ollama = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:  # pragma: no cover
+    import ollama as _ollama
+
+
+OFFLINE_MODE = os.getenv("SOLARWINDS_OFFLINE_MODE", "").lower() == "true"
 
 from app.core.config import settings
 from app.core.exceptions import LLMError
@@ -197,9 +208,14 @@ class OLLAMAProvider(BaseLLMProvider):
         self.client = None
         self.model = settings.ollama_model
         self.base_url = settings.ollama_base_url
-        
+
     async def initialize(self) -> None:
         """Initialize the OLLAMA client."""
+        if ollama is None:
+            raise LLMError(
+                "Ollama client is not installed. Install the ollama package to use the local LLM provider."
+            )
+
         try:
             # OLLAMA client is synchronous, so we'll use it in a thread pool
             self.client = ollama.Client(host=self.base_url)
@@ -355,8 +371,17 @@ class LLMService:
         
     async def initialize(self) -> None:
         """Initialize the LLM service with the configured provider."""
+        if OFFLINE_MODE:
+            logger.warning("Offline mode enabled; skipping LLM provider initialization")
+            try:
+                self.provider_type = LLMProvider(settings.llm_provider.lower())
+            except Exception:
+                self.provider_type = None
+            self.provider = None
+            return
+
         provider_name = settings.llm_provider.lower()
-        
+
         if provider_name == LLMProvider.OPENROUTER:
             self.provider = OpenRouterProvider()
             self.provider_type = LLMProvider.OPENROUTER
@@ -365,7 +390,7 @@ class LLMService:
             self.provider_type = LLMProvider.OLLAMA
         else:
             raise LLMError(f"Unknown LLM provider: {provider_name}")
-        
+
         await self.provider.initialize()
         logger.info(f"LLM service initialized with provider: {self.provider_type}")
     
@@ -376,6 +401,9 @@ class LLMService:
         stream: bool = False
     ) -> str:
         """Generate a response for the given query and sources."""
+        if OFFLINE_MODE:
+            raise LLMError("LLM service is disabled in offline mode")
+
         if not self.provider:
             await self.initialize()
         
@@ -395,6 +423,9 @@ class LLMService:
         sources: List[SourceDoc]
     ) -> AsyncGenerator[str, None]:
         """Generate a streaming response for the given query and sources."""
+        if OFFLINE_MODE:
+            raise LLMError("LLM streaming is disabled in offline mode")
+
         if not self.provider:
             await self.initialize()
         
@@ -409,6 +440,13 @@ class LLMService:
     
     async def health_check(self) -> Dict[str, Any]:
         """Check the health of the LLM service."""
+        if OFFLINE_MODE:
+            return {
+                "provider": self.provider_type or settings.llm_provider,
+                "status": "disabled",
+                "message": "LLM health check skipped in offline mode",
+            }
+
         if not self.provider:
             try:
                 await self.initialize()

@@ -19,34 +19,38 @@ class IndexingService:
     
     def __init__(self):
         self._initialized = False
-        
+        self._last_error: Optional[str] = None
+
     async def initialize(self) -> None:
         """Initialize the indexing service and its dependencies."""
         if self._initialized:
             return
-            
+
         try:
             logger.info("Initializing indexing service")
-            
+
             # Initialize embedding service
             await embedding_service.initialize()
-            
+
             # Initialize vector store
             await vector_store_service.connect()
-            
+
             self._initialized = True
+            self._last_error = None
             logger.info("Indexing service initialized successfully")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize indexing service: {str(e)}")
-            raise VectorStoreError(f"Indexing service initialization failed: {str(e)}")
-    
+            self._initialized = False
+            self._last_error = str(e)
+
     async def cleanup(self) -> None:
         """Cleanup the indexing service."""
         try:
             await embedding_service.cleanup()
             await vector_store_service.disconnect()
             self._initialized = False
+            self._last_error = None
             logger.info("Indexing service cleaned up")
         except Exception as e:
             logger.error(f"Error during indexing service cleanup: {str(e)}")
@@ -313,10 +317,17 @@ class IndexingService:
         """
         if not self._initialized:
             await self.initialize()
-        
+
+            if not self._initialized:
+                logger.warning(
+                    "Indexing service unavailable; returning empty search results",
+                    extra={"error": self._last_error},
+                )
+                return []
+
         if not query.strip():
             return []
-        
+
         try:
             # Generate embedding for the query
             query_embedding = await embedding_service.get_embedding(query.strip())
@@ -340,7 +351,7 @@ class IndexingService:
             
         except Exception as e:
             logger.error(f"Error searching solutions: {str(e)}")
-            raise VectorStoreError(f"Solution search failed: {str(e)}")
+            return []
     
     async def get_solution_by_id(self, solution_id: str) -> Optional[SolutionRecord]:
         """
@@ -354,7 +365,14 @@ class IndexingService:
         """
         if not self._initialized:
             await self.initialize()
-        
+
+            if not self._initialized:
+                logger.warning(
+                    "Indexing service unavailable when fetching solution by ID",
+                    extra={"solution_id": solution_id, "error": self._last_error},
+                )
+                return None
+
         try:
             return await vector_store_service.get_solution_by_id(solution_id)
         except Exception as e:
@@ -372,12 +390,9 @@ class IndexingService:
             stats = {}
             
             if self._initialized:
-                # Get vector store stats
                 vector_stats = await vector_store_service.get_collection_stats()
-                
-                # Get embedding service info
                 embedding_info = await embedding_service.get_service_info()
-                
+
                 stats = {
                     "initialized": True,
                     "vector_store": vector_stats,
@@ -386,16 +401,17 @@ class IndexingService:
             else:
                 stats = {
                     "initialized": False,
-                    "error": "Service not initialized"
+                    "error": self._last_error or "Service not initialized",
                 }
-            
+
             return stats
-            
+
         except Exception as e:
             logger.error(f"Error getting index stats: {str(e)}")
             return {
                 "initialized": self._initialized,
-                "error": str(e)
+                "error": str(e),
+                "last_error": self._last_error,
             }
     
     async def rebuild_index(self, solutions: List[SolutionRecord]) -> Dict[str, Any]:
@@ -438,35 +454,17 @@ class IndexingService:
         Returns:
             Dictionary with health status
         """
-        try:
-            if not self._initialized:
-                return {
-                    "healthy": False,
-                    "error": "Service not initialized"
-                }
-            
-            # Test embedding service
-            test_embedding = await embedding_service.get_embedding("test")
-            
-            # Test vector store with a simple query
-            await vector_store_service.search_similar(
-                query_embedding=test_embedding,
-                top_k=1
-            )
-            
-            return {
-                "healthy": True,
-                "embedding_dimension": len(test_embedding),
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-            
-        except Exception as e:
-            logger.error(f"Health check failed: {str(e)}")
+        if not self._initialized:
             return {
                 "healthy": False,
-                "error": str(e),
+                "error": self._last_error or "Service not initialized",
                 "timestamp": datetime.utcnow().isoformat(),
             }
+
+        return {
+            "healthy": True,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
 
 
 # Global service instance

@@ -3538,6 +3538,7 @@ requires-dist = [
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.10.0" },
     { name = "python-json-logger", specifier = ">=3.3.0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "pytest-asyncio", specifier = ">=1.1.0" },
     { name = "redis", extras = ["hiredis"], specifier = ">=6.2.0" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "sentence-transformers", specifier = ">=5.0.0" },

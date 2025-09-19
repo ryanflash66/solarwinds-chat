@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChatRequest(BaseModel):
@@ -16,6 +16,15 @@ class ChatRequest(BaseModel):
         description="User query for the chatbot",
         example="How do I reset the printer spooler service?"
     )
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: str) -> str:
+        """Ensure the query contains non-whitespace characters."""
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Query must contain non-whitespace characters.")
+        return cleaned
 
 
 class SourceDoc(BaseModel):
@@ -47,7 +56,10 @@ class SolutionRecord(BaseModel):
     title: str = Field(..., description="Solution title")
     category: str = Field(..., description="Solution category")
     content: str = Field(..., description="Solution content/body")
-    updated_at: datetime = Field(..., description="Last updated timestamp")
+    updated_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        description="Last updated timestamp",
+    )
     tags: List[str] = Field(default_factory=list, description="Solution tags")
     url: Optional[str] = Field(None, description="Original solution URL")
     

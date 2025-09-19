@@ -8,7 +8,17 @@ from typing import Dict, List, Optional, Any, Union
 from concurrent.futures import ThreadPoolExecutor
 
 import openai
-from sentence_transformers import SentenceTransformer
+from typing import TYPE_CHECKING
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # pragma: no cover - optional dependency in test envs
+    SentenceTransformer = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:  # pragma: no cover
+    from sentence_transformers import SentenceTransformer as _SentenceTransformer
+else:  # pragma: no cover - runtime fallback when dependency missing
+    _SentenceTransformer = Any  # type: ignore[assignment]
 
 from app.core.config import settings
 from app.core.exceptions import EmbeddingError
@@ -132,7 +142,7 @@ class LocalEmbeddingProvider:
     """Local Sentence-Transformers embedding provider."""
     
     def __init__(self):
-        self.model: Optional[SentenceTransformer] = None
+        self.model: Optional[_SentenceTransformer] = None
         self.model_name = "all-MiniLM-L6-v2"  # Fast and efficient model
         self.executor = ThreadPoolExecutor(max_workers=2)
         
@@ -153,8 +163,13 @@ class LocalEmbeddingProvider:
             logger.error(f"Failed to initialize local embedding model: {str(e)}")
             raise EmbeddingError(f"Local embedding initialization failed: {str(e)}")
     
-    def _load_model(self) -> SentenceTransformer:
+    def _load_model(self) -> _SentenceTransformer:
         """Load the Sentence-Transformers model (sync operation)."""
+        if SentenceTransformer is None:
+            raise EmbeddingError(
+                "Sentence-Transformers is not installed. Install sentence-transformers to use the local provider."
+            )
+
         return SentenceTransformer(self.model_name)
     
     async def get_embedding(self, text: str) -> List[float]:

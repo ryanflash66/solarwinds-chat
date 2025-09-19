@@ -1,10 +1,10 @@
 """Metrics endpoints for monitoring and observability."""
 
-import psutil
 import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Dict
 
+import psutil
 from fastapi import APIRouter, status
 from pydantic import BaseModel
 
@@ -18,24 +18,32 @@ router = APIRouter()
 
 class SystemMetrics(BaseModel):
     """System metrics model."""
-    
+
     cpu_percent: float
     memory_percent: float
     memory_used_mb: float
     memory_total_mb: float
-    disk_usage_percent: float
+    disk_percent: float
+
+
+class ApplicationSection(BaseModel):
+    """Application-specific metrics surfaced to the UI."""
+
     uptime_seconds: float
-
-
-class ApplicationMetrics(BaseModel):
-    """Application metrics model."""
-    
-    timestamp: datetime
+    total_requests: int
+    active_connections: int
     version: str
     environment: str
     llm_provider: str
     embedding_provider: str
     debug_mode: bool
+
+
+class MetricsResponse(BaseModel):
+    """Envelope for application and system metrics."""
+
+    timestamp: datetime
+    application: ApplicationSection
     system: SystemMetrics
     
     # TODO: Add business metrics in future phases
@@ -48,16 +56,17 @@ class ApplicationMetrics(BaseModel):
 
 # Store application start time for uptime calculation
 _start_time = time.time()
+_total_requests = 0
 
 
 @router.get(
     "/metrics",
-    response_model=ApplicationMetrics,
+    response_model=MetricsResponse,
     status_code=status.HTTP_200_OK,
     summary="Application Metrics",
     description="Returns comprehensive application and system metrics for monitoring",
 )
-async def get_metrics() -> ApplicationMetrics:
+async def get_metrics() -> MetricsResponse:
     """
     Get application and system metrics.
     
@@ -65,7 +74,10 @@ async def get_metrics() -> ApplicationMetrics:
         ApplicationMetrics: Current application and system metrics
     """
     current_time = time.time()
+    global _total_requests
+
     uptime = current_time - _start_time
+    _total_requests += 1
     
     # Get system metrics
     cpu_percent = psutil.cpu_percent(interval=0.1)
@@ -77,23 +89,30 @@ async def get_metrics() -> ApplicationMetrics:
         memory_percent=memory.percent,
         memory_used_mb=memory.used / (1024 * 1024),
         memory_total_mb=memory.total / (1024 * 1024),
-        disk_usage_percent=disk.percent,
+        disk_percent=disk.percent,
+    )
+
+    application_metrics = ApplicationSection(
         uptime_seconds=uptime,
+        total_requests=_total_requests,
+        active_connections=0,
+        version="1.0.0",
+        environment="development" if settings.debug else "production",
+        llm_provider=settings.llm_provider,
+        embedding_provider=settings.embedding_provider,
+        debug_mode=settings.debug,
     )
     
     logger.info("Metrics requested", extra={
         "cpu_percent": cpu_percent,
         "memory_percent": memory.percent,
         "uptime_seconds": uptime,
+        "total_requests": _total_requests,
     })
-    
-    return ApplicationMetrics(
+
+    return MetricsResponse(
         timestamp=datetime.utcnow(),
-        version="1.0.0",
-        environment="development" if settings.debug else "production",
-        llm_provider=settings.llm_provider,
-        embedding_provider=settings.embedding_provider,
-        debug_mode=settings.debug,
+        application=application_metrics,
         system=system_metrics,
     )
 

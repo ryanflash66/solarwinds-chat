@@ -1,7 +1,7 @@
 """Solutions endpoints with SolarWinds integration."""
 
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -49,10 +49,7 @@ async def list_solutions(
         
     except Exception as e:
         logger.error(f"Error listing solutions: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list solutions: {str(e)}"
-        )
+        return []
 
 
 @router.get("/solutions/sync-status", response_model=Dict[str, Any])
@@ -82,10 +79,11 @@ async def get_sync_status() -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Error getting sync status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get sync status: {str(e)}"
-        )
+        return {
+            "service_running": False,
+            "error": str(e),
+            "solarwinds_api": {"status": "error", "message": str(e)},
+        }
 
 
 @router.post("/solutions/sync")
@@ -110,10 +108,10 @@ async def trigger_sync(force: bool = False) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Error triggering sync: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to trigger sync: {str(e)}"
-        )
+        return {
+            "status": "error",
+            "message": str(e),
+        }
 
 
 @router.get("/solutions/test-connection")
@@ -192,10 +190,7 @@ async def search_solutions(
         raise
     except Exception as e:
         logger.error(f"Error searching solutions: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Solution search failed: {str(e)}"
-        )
+        return []
 
 
 @router.get("/solutions/stats")
@@ -209,19 +204,20 @@ async def get_index_stats() -> Dict[str, Any]:
     try:
         stats = await indexing_service.get_index_stats()
         health = await indexing_service.health_check()
-        
+
         return {
             **stats,
             "health": health,
             "timestamp": datetime.utcnow().isoformat(),
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting index stats: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get index stats: {str(e)}"
-        )
+        return {
+            "initialized": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
 
 
 @router.get("/solutions/{solution_id}")

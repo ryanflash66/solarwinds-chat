@@ -5,12 +5,14 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add the project root to sys.path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 
-async def test_mock_data_sync():
+async def run_mock_data_sync() -> bool:
     """Test the mock data sync functionality."""
     print("Testing mock data sync functionality...\n")
     
@@ -65,13 +67,20 @@ async def test_mock_data_sync():
     except Exception as e:
         print(f"Test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
 
+@pytest.mark.asyncio
+async def test_mock_data_sync():
+    """Pytest wrapper that asserts the mock sync script succeeds."""
+    assert await run_mock_data_sync() is True
+
+
 async def main():
     """Run the mock sync test."""
-    success = await test_mock_data_sync()
+    success = await run_mock_data_sync()
     return 0 if success else 1
 
 

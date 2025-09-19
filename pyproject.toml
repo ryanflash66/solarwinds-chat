@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.10.1",
     "python-json-logger>=3.3.0",
     "python-multipart>=0.0.20",
+    "pytest-asyncio>=1.1.0",
     "redis[hiredis]>=6.2.0",
     "requests>=2.31.0",
     "sentence-transformers>=5.0.0",
@@ -31,7 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
+    "pytest-asyncio>=1.1.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
     "httpx>=0.28.1",

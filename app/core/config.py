@@ -80,8 +80,9 @@ class Settings(BaseSettings):
 # Global settings instance
 # Create settings with explicit environment variables for development
 import os
-os.environ.setdefault('DEBUG', 'true')
-os.environ.setdefault('LLM_PROVIDER', 'ollama')
-os.environ.setdefault('EMBEDDING_PROVIDER', 'local')
+os.environ.setdefault('DEBUG', 'false')
+os.environ.setdefault('LLM_PROVIDER', 'openrouter')
+os.environ.setdefault('EMBEDDING_PROVIDER', 'openai')
+os.environ.setdefault('REDIS_ENABLED', 'false')
 
 settings = Settings()

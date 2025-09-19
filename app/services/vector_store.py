@@ -3,12 +3,26 @@
 import asyncio
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
-import chromadb
-from chromadb.api.models.Collection import Collection
-from chromadb.config import Settings as ChromaSettings
+try:
+    import chromadb
+    from chromadb.api import ClientAPI
+    from chromadb.api.models.Collection import Collection
+    from chromadb.config import Settings as ChromaSettings
+except ImportError:  # pragma: no cover - optional dependency in tests
+    chromadb = None  # type: ignore[assignment]
+    ClientAPI = Any  # type: ignore[assignment]
+    Collection = Any  # type: ignore[assignment]
+    ChromaSettings = Any  # type: ignore[assignment]
+
+if TYPE_CHECKING:  # pragma: no cover
+    from chromadb.api import ClientAPI as _ClientAPI
+    from chromadb.api.models.Collection import Collection as _Collection
+else:  # pragma: no cover - runtime fallback without Chroma
+    _ClientAPI = Any  # type: ignore[assignment]
+    _Collection = Any  # type: ignore[assignment]
 
 from app.core.config import settings
 from app.core.exceptions import VectorStoreError
@@ -22,8 +36,8 @@ class VectorStoreService:
     """Service for managing the Chroma vector database."""
     
     def __init__(self):
-        self.client: Optional[chromadb.ClientAPI] = None
-        self.collection: Optional[Collection] = None
+        self.client: Optional[_ClientAPI] = None
+        self.collection: Optional[_Collection] = None
         self.executor = ThreadPoolExecutor(max_workers=4)
         
     async def connect(self) -> None:
@@ -32,6 +46,11 @@ class VectorStoreService:
             # Run Chroma operations in thread pool (it's not fully async)
             loop = asyncio.get_event_loop()
             
+            if chromadb is None:
+                raise VectorStoreError(
+                    "ChromaDB is not installed. Install chromadb to enable vector store features."
+                )
+
             # Create Chroma client
             self.client = await loop.run_in_executor(
                 self.executor,
@@ -54,8 +73,13 @@ class VectorStoreService:
             logger.error(f"Failed to connect to Chroma: {str(e)}")
             raise VectorStoreError(f"Chroma connection failed: {str(e)}")
     
-    def _create_client(self) -> chromadb.ClientAPI:
+    def _create_client(self) -> _ClientAPI:
         """Create Chroma client (sync operation)."""
+        if chromadb is None:
+            raise VectorStoreError(
+                "ChromaDB is not installed. Install chromadb to enable the vector store."
+            )
+
         try:
             # Try HTTP client first
             client = chromadb.HttpClient(
@@ -86,7 +110,7 @@ class VectorStoreService:
             except Exception as fallback_error:
                 raise VectorStoreError(f"Both HTTP and persistent clients failed: {str(fallback_error)}")
     
-    def _get_or_create_collection(self) -> Collection:
+    def _get_or_create_collection(self) -> _Collection:
         """Get or create the solutions collection (sync operation)."""
         if not self.client:
             raise VectorStoreError("Chroma client not initialized")
