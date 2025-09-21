@@ -61,6 +61,30 @@ _total_requests = 0
 _request_counter_lock: asyncio.Lock | None = None
 
 
+def get_uptime_seconds() -> float:
+    """Return the number of seconds the application has been running."""
+
+    return max(time.time() - _start_time, 0.0)
+
+
+def reset_metrics_state() -> None:
+    """Reset module-level metrics state for testing and service restarts."""
+
+    global _start_time
+    global _total_requests
+    global _request_counter_lock
+
+    previous_start = globals().get("_start_time", 0.0)
+    new_start_time = time.time() + 1e-3
+    if new_start_time <= previous_start:
+        # Guarantee monotonicity even on coarse time resolutions
+        new_start_time = previous_start + 1e-3
+
+    _start_time = new_start_time
+    _total_requests = 0
+    _request_counter_lock = None
+
+
 async def _increment_request_count() -> int:
     """Increment the total request counter in a thread-safe manner."""
 
@@ -89,8 +113,7 @@ async def get_metrics() -> MetricsResponse:
     Returns:
         ApplicationMetrics: Current application and system metrics
     """
-    current_time = time.time()
-    uptime = current_time - _start_time
+    uptime = get_uptime_seconds()
     total_requests = await _increment_request_count()
     
     # Get system metrics
@@ -148,8 +171,7 @@ async def get_prometheus_metrics():
     Returns:
         str: Metrics in Prometheus exposition format
     """
-    current_time = time.time()
-    uptime = current_time - _start_time
+    uptime = get_uptime_seconds()
     
     # Get system metrics
     cpu_percent = psutil.cpu_percent(interval=0.1)
