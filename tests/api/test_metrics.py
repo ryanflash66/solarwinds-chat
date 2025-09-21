@@ -3,6 +3,17 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.v1.metrics import reset_metrics_state
+
+
+@pytest.fixture(autouse=True)
+def reset_metrics_globals() -> None:
+    """Ensure metrics module state is reset before and after each test."""
+
+    reset_metrics_state()
+    yield
+    reset_metrics_state()
+
 
 @pytest.fixture()
 def metrics_payload(client: TestClient) -> dict:

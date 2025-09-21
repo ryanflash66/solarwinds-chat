@@ -1,15 +1,19 @@
 """Health check endpoints."""
 
-import inspect
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.exceptions import SolarWindsChatbotException
 from app.core.logging import get_logger
+from app.services.indexing_service import indexing_service
+from app.services.llm import llm_service
+from app.services.solarwinds import solarwinds_service
+from app.services.sync_service import sync_service
 
 logger = get_logger(__name__)
 
@@ -30,69 +34,124 @@ class HealthResponse(BaseModel):
 _start_time = time.time()
 
 
-async def _safe_check(
-    component_name: str,
-    check_fn: Callable[[], Any],
-    mapper: Callable[[Any], Dict[str, Any]],
-) -> Dict[str, Any]:
-    """Execute a health check function safely and map the result."""
+HealthCheckFn = Callable[[], Awaitable[Dict[str, Any]]]
+
+EXPECTED_HEALTH_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    SolarWindsChatbotException,
+    TimeoutError,
+    ConnectionError,
+)
+
+
+async def _safe_check(component_name: str, check_fn: HealthCheckFn) -> Dict[str, Any]:
+    """Execute a health check function while handling expected failures."""
 
     try:
-        result = check_fn()
-        if inspect.isawaitable(result):
-            result = await result
-
-        mapped = mapper(result)
-        if "status" not in mapped:
-            raise ValueError("Component mapper must include a 'status' field")
-        return mapped
-    except Exception as exc:  # pragma: no cover - defensive logging path
-        logger.exception(
+        return await check_fn()
+    except EXPECTED_HEALTH_EXCEPTIONS as exc:
+        logger.error(
             "Health check component failure",
-            extra={"component": component_name},
+            extra={
+                "component": component_name,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
         )
         human_readable = component_name.replace("_", " ")
         return {
             "status": "unhealthy",
             "message": f"{human_readable} error: {exc}",
         }
+    except Exception as exc:  # pragma: no cover - surfacing unexpected errors
+        logger.exception(
+            "Unexpected health check failure",
+            extra={"component": component_name},
+        )
+        raise
 
 
-async def _get_index_stats() -> Dict[str, Any]:
-    from app.services.indexing_service import indexing_service
+async def check_vector_store() -> Dict[str, Any]:
+    """Evaluate the vector store health."""
 
-    return await indexing_service.get_index_stats()
+    stats = await indexing_service.get_index_stats()
+    health = await indexing_service.health_check()
 
+    if stats.get("initialized") and health.get("healthy"):
+        return {"status": "healthy", "message": "Vector store operational"}
 
-async def _get_embedding_health() -> Dict[str, Any]:
-    from app.services.indexing_service import indexing_service
-
-    return await indexing_service.health_check()
-
-
-async def _get_llm_health() -> Dict[str, Any]:
-    from app.services.llm import llm_service
-
-    return await llm_service.health_check()
+    error = health.get("error") or stats.get("error") or "Service not initialized"
+    return {"status": "degraded", "message": error}
 
 
-async def _get_sync_status() -> Dict[str, Any]:
-    from app.services.sync_service import sync_service
+async def check_embedding_service() -> Dict[str, Any]:
+    """Evaluate the embedding service health."""
 
-    return await sync_service.get_sync_status()
+    health = await indexing_service.health_check()
+    if health.get("healthy"):
+        return {"status": "healthy", "message": "Embedding service operational"}
+
+    return {
+        "status": "degraded",
+        "message": health.get("error") or "Embedding service degraded",
+    }
 
 
-def _get_solarwinds_configuration() -> Dict[str, Any]:
-    from app.services.solarwinds import solarwinds_service
+async def check_llm_service() -> Dict[str, Any]:
+    """Evaluate the LLM service health."""
+
+    health = await llm_service.health_check()
+    status = health.get("status", "unknown")
+    provider = health.get("provider")
+    message = (
+        health.get("message")
+        or health.get("error")
+        or (f"Provider: {provider}" if provider else "LLM service status unknown")
+    )
+
+    result: Dict[str, Any] = {"status": status, "message": message}
+    if provider:
+        result["provider"] = provider
+    if model := health.get("model"):
+        result["model"] = model
+    return result
+
+
+async def check_sync_service() -> Dict[str, Any]:
+    """Evaluate the sync service health."""
+
+    status = await sync_service.get_sync_status()
+    if error := status.get("error"):
+        return {"status": "unhealthy", "message": error}
+
+    service_running = bool(status.get("service_running"))
+    message = (
+        "Sync service running" if service_running else "Sync service not running"
+    )
+    result: Dict[str, Any] = {
+        "status": "healthy" if service_running else "degraded",
+        "message": message,
+    }
+
+    for key in ("last_sync_time", "next_sync_time"):
+        if status.get(key):
+            result[key] = status[key]
+
+    return result
+
+
+async def check_solarwinds_api() -> Dict[str, Any]:
+    """Report SolarWinds API configuration status."""
 
     client = getattr(solarwinds_service, "client", None)
-    configured = bool(client and client.api_key)
-    message = (
-        "SolarWinds API configured"
-        if configured
-        else "SolarWinds API not configured"
-    )
-    return {"configured": configured, "message": message}
+    configured = bool(client and getattr(client, "api_key", None))
+    return {
+        "status": "healthy" if configured else "disabled",
+        "message": (
+            "SolarWinds API configured"
+            if configured
+            else "SolarWinds API not configured"
+        ),
+    }
 
 
 @router.get(
@@ -119,66 +178,16 @@ async def health_check() -> HealthResponse:
         "logging": {"status": "healthy", "message": "Logging system operational"},
     }
 
-    service_checks = [
-        (
-            "vector_store",
-            _get_index_stats,
-            lambda stats: {
-                "status": "healthy" if stats.get("initialized") else "degraded",
-                "message": (
-                    "Vector store operational"
-                    if stats.get("initialized")
-                    else stats.get("error", "Service not initialized")
-                ),
-            },
-        ),
-        (
-            "embedding_service",
-            _get_embedding_health,
-            lambda health: {
-                "status": "healthy" if health.get("healthy") else "degraded",
-                "message": health.get("error") or "Embedding service operational",
-            },
-        ),
-        (
-            "llm_service",
-            _get_llm_health,
-            lambda health: {
-                "status": health.get("status", "unknown"),
-                "message": health.get("error")
-                or f"Provider: {health.get('provider', 'unknown')}",
-            },
-        ),
-        (
-            "sync_service",
-            _get_sync_status,
-            lambda sync_status: {
-                "status": "healthy"
-                if sync_status.get("service_running")
-                else "degraded",
-                "message": (
-                    "Sync service running"
-                    if sync_status.get("service_running")
-                    else "Sync service not running"
-                ),
-            },
-        ),
-        (
-            "solarwinds_api",
-            _get_solarwinds_configuration,
-            lambda config: {
-                "status": "healthy" if config.get("configured") else "disabled",
-                "message": config.get("message", "SolarWinds API not configured"),
-            },
-        ),
+    service_checks: list[tuple[str, HealthCheckFn]] = [
+        ("vector_store", check_vector_store),
+        ("embedding_service", check_embedding_service),
+        ("llm_service", check_llm_service),
+        ("sync_service", check_sync_service),
+        ("solarwinds_api", check_solarwinds_api),
     ]
 
-    for component_name, check_fn, mapper in service_checks:
-        components[component_name] = await _safe_check(
-            component_name,
-            check_fn,
-            mapper,
-        )
+    for component_name, check_fn in service_checks:
+        components[component_name] = await _safe_check(component_name, check_fn)
     
     logger.info("Health check requested", extra={
         "uptime_seconds": uptime,

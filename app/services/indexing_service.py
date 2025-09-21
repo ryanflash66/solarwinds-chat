@@ -419,9 +419,13 @@ class IndexingService:
             return await vector_store_service.get_solution_by_id(solution_id)
         except VectorStoreError as exc:
             self._last_error = str(exc)
-            logger.exception(
-                "Vector store error retrieving solution by ID",
-                extra={"solution_id": solution_id},
+            logger.error(
+                "VectorStoreError retrieving solution by ID",
+                extra={
+                    "solution_id": solution_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
             )
             raise
         except Exception as exc:

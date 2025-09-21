@@ -57,8 +57,22 @@ class MetricsResponse(BaseModel):
 
 # Store application start time for uptime calculation
 _start_time = time.time()
+# NOTE: This in-memory counter is process-local. Deployments that run multiple worker
+# processes should provide a distributed metrics backend to keep counts in sync.
 _total_requests = 0
 _request_counter_lock: asyncio.Lock | None = None
+
+
+def reset_metrics_state() -> None:
+    """Reset metrics module globals for deterministic testing."""
+
+    global _start_time
+    global _total_requests
+    global _request_counter_lock
+
+    _start_time = time.time()
+    _total_requests = 0
+    _request_counter_lock = None
 
 
 async def _increment_request_count() -> int:
