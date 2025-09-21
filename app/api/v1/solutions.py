@@ -10,6 +10,7 @@ from app.services.sync_service import sync_service
 from app.services.solarwinds import solarwinds_service
 from app.services.indexing_service import indexing_service
 from app.core.logging import get_logger
+from app.core.exceptions import SolarWindsChatbotException
 
 logger = get_logger(__name__)
 
@@ -47,9 +48,20 @@ async def list_solutions(
         # TODO: Implement proper listing functionality in vector store
         return []
         
-    except Exception as e:
-        logger.error(f"Error listing solutions: {str(e)}")
-        return []
+    except SolarWindsChatbotException as exc:
+        log_extra = {"error": exc.message}
+        log_extra.update(exc.details)
+        logger.error(
+            "Error listing solutions",
+            extra=log_extra,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    except Exception as exc:
+        logger.exception("Error listing solutions")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list solutions: {str(exc)}",
+        )
 
 
 @router.get("/solutions/sync-status", response_model=Dict[str, Any])
@@ -186,11 +198,22 @@ async def search_solutions(
         
         return [result.model_dump() for result in results]
         
+    except SolarWindsChatbotException as exc:
+        log_extra = {"error": exc.message}
+        log_extra.update(exc.details)
+        logger.error(
+            "Indexing service error during solution search",
+            extra=log_extra,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error searching solutions: {str(e)}")
-        return []
+    except Exception as exc:
+        logger.exception("Error searching solutions")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to search solutions: {str(exc)}",
+        )
 
 
 @router.get("/solutions/stats")
@@ -242,11 +265,19 @@ async def get_solution(solution_id: str) -> Dict[str, Any]:
         
         return solution.model_dump()
         
+    except SolarWindsChatbotException as exc:
+        log_extra = {"error": exc.message}
+        log_extra.update(exc.details)
+        logger.error(
+            "Indexing service error when getting solution",
+            extra=log_extra,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error getting solution: {str(e)}")
+    except Exception as exc:
+        logger.exception("Error getting solution")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get solution: {str(e)}"
+            detail=f"Failed to get solution: {str(exc)}"
         )

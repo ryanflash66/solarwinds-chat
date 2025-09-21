@@ -1,8 +1,9 @@
 """Health check endpoints."""
 
+import inspect
 import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any, Callable, Dict
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel
@@ -29,6 +30,71 @@ class HealthResponse(BaseModel):
 _start_time = time.time()
 
 
+async def _safe_check(
+    component_name: str,
+    check_fn: Callable[[], Any],
+    mapper: Callable[[Any], Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Execute a health check function safely and map the result."""
+
+    try:
+        result = check_fn()
+        if inspect.isawaitable(result):
+            result = await result
+
+        mapped = mapper(result)
+        if "status" not in mapped:
+            raise ValueError("Component mapper must include a 'status' field")
+        return mapped
+    except Exception as exc:  # pragma: no cover - defensive logging path
+        logger.exception(
+            "Health check component failure",
+            extra={"component": component_name},
+        )
+        human_readable = component_name.replace("_", " ")
+        return {
+            "status": "unhealthy",
+            "message": f"{human_readable} error: {exc}",
+        }
+
+
+async def _get_index_stats() -> Dict[str, Any]:
+    from app.services.indexing_service import indexing_service
+
+    return await indexing_service.get_index_stats()
+
+
+async def _get_embedding_health() -> Dict[str, Any]:
+    from app.services.indexing_service import indexing_service
+
+    return await indexing_service.health_check()
+
+
+async def _get_llm_health() -> Dict[str, Any]:
+    from app.services.llm import llm_service
+
+    return await llm_service.health_check()
+
+
+async def _get_sync_status() -> Dict[str, Any]:
+    from app.services.sync_service import sync_service
+
+    return await sync_service.get_sync_status()
+
+
+def _get_solarwinds_configuration() -> Dict[str, Any]:
+    from app.services.solarwinds import solarwinds_service
+
+    client = getattr(solarwinds_service, "client", None)
+    configured = bool(client and client.api_key)
+    message = (
+        "SolarWinds API configured"
+        if configured
+        else "SolarWinds API not configured"
+    )
+    return {"configured": configured, "message": message}
+
+
 @router.get(
     "/health",
     response_model=HealthResponse,
@@ -53,95 +119,66 @@ async def health_check() -> HealthResponse:
         "logging": {"status": "healthy", "message": "Logging system operational"},
     }
 
-    # Indexing and embedding services
-    try:
-        from app.services.indexing_service import indexing_service
+    service_checks = [
+        (
+            "vector_store",
+            _get_index_stats,
+            lambda stats: {
+                "status": "healthy" if stats.get("initialized") else "degraded",
+                "message": (
+                    "Vector store operational"
+                    if stats.get("initialized")
+                    else stats.get("error", "Service not initialized")
+                ),
+            },
+        ),
+        (
+            "embedding_service",
+            _get_embedding_health,
+            lambda health: {
+                "status": "healthy" if health.get("healthy") else "degraded",
+                "message": health.get("error") or "Embedding service operational",
+            },
+        ),
+        (
+            "llm_service",
+            _get_llm_health,
+            lambda health: {
+                "status": health.get("status", "unknown"),
+                "message": health.get("error")
+                or f"Provider: {health.get('provider', 'unknown')}",
+            },
+        ),
+        (
+            "sync_service",
+            _get_sync_status,
+            lambda sync_status: {
+                "status": "healthy"
+                if sync_status.get("service_running")
+                else "degraded",
+                "message": (
+                    "Sync service running"
+                    if sync_status.get("service_running")
+                    else "Sync service not running"
+                ),
+            },
+        ),
+        (
+            "solarwinds_api",
+            _get_solarwinds_configuration,
+            lambda config: {
+                "status": "healthy" if config.get("configured") else "disabled",
+                "message": config.get("message", "SolarWinds API not configured"),
+            },
+        ),
+    ]
 
-        stats = await indexing_service.get_index_stats()
-        health = await indexing_service.health_check()
-
-        if stats.get("initialized") and health.get("healthy"):
-            components["vector_store"] = {
-                "status": "healthy",
-                "message": "Vector store operational",
-            }
-            components["embedding_service"] = {
-                "status": "healthy",
-                "message": "Embedding service operational",
-            }
-        else:
-            error_message = health.get("error") or stats.get("error") or "Service not initialized"
-            components["vector_store"] = {
-                "status": "degraded",
-                "message": error_message,
-            }
-            components["embedding_service"] = {
-                "status": "degraded",
-                "message": error_message,
-            }
-    except Exception as exc:
-        message = str(exc)
-        components["vector_store"] = {
-            "status": "unhealthy",
-            "message": f"Vector store error: {message}",
-        }
-        components["embedding_service"] = {
-            "status": "unhealthy",
-            "message": f"Embedding error: {message}",
-        }
-
-    # LLM provider
-    try:
-        from app.services.llm import llm_service
-
-        llm_status = await llm_service.health_check()
-        components["llm_service"] = {
-            "status": llm_status.get("status", "unknown"),
-            "message": llm_status.get("error")
-            or f"Provider: {llm_status.get('provider', 'unknown')}",
-        }
-    except Exception as exc:
-        components["llm_service"] = {
-            "status": "unhealthy",
-            "message": f"LLM service error: {str(exc)}",
-        }
-
-    # Sync service
-    try:
-        from app.services.sync_service import sync_service
-
-        sync_status = await sync_service.get_sync_status()
-        components["sync_service"] = {
-            "status": "healthy" if sync_status.get("service_running") else "degraded",
-            "message": "Sync service running"
-            if sync_status.get("service_running")
-            else "Sync service not running",
-        }
-    except Exception as exc:
-        components["sync_service"] = {
-            "status": "unhealthy",
-            "message": f"Sync service error: {str(exc)}",
-        }
-
-    # SolarWinds API configuration
-    try:
-        from app.services.solarwinds import solarwinds_service
-
-        if getattr(solarwinds_service, "client", None) and solarwinds_service.client.api_key:
-            components["solarwinds_api"] = {
-                "status": "healthy",
-                "message": "SolarWinds API configured",
-            }
-        else:
-            components["solarwinds_api"] = {
-                "status": "disabled",
-                "message": "SolarWinds API not configured",
-            }
-    except Exception as exc:
-        components["solarwinds_api"] = {
-            "status": "unhealthy",
-            "message": f"SolarWinds error: {str(exc)}",
-        }
+    for component_name, check_fn, mapper in service_checks:
+        components[component_name] = await _safe_check(
+            component_name,
+            check_fn,
+            mapper,
+        )
     
     logger.info("Health check requested", extra={
         "uptime_seconds": uptime,

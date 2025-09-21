@@ -4,19 +4,26 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture()
+def metrics_payload(client: TestClient) -> dict:
+    response = client.get("/api/v1/metrics")
+    assert response.status_code == 200
+    return response.json()
+
+
 @pytest.mark.api
-def test_metrics_structure(client: TestClient):
-    """Ensure the metrics endpoint matches the Streamlit UI expectations."""
-    first_response = client.get("/api/v1/metrics")
-    assert first_response.status_code == 200
+def test_metrics_structure(metrics_payload: dict):
+    """Ensure top-level keys exist."""
 
-    payload = first_response.json()
-    assert "timestamp" in payload
-    assert "application" in payload
-    assert "system" in payload
+    assert "timestamp" in metrics_payload
+    assert "application" in metrics_payload
+    assert "system" in metrics_payload
 
-    application = payload["application"]
-    for key in [
+
+@pytest.mark.api
+@pytest.mark.parametrize(
+    "field",
+    [
         "uptime_seconds",
         "total_requests",
         "active_connections",
@@ -25,18 +32,34 @@ def test_metrics_structure(client: TestClient):
         "llm_provider",
         "embedding_provider",
         "debug_mode",
-    ]:
-        assert key in application, f"Missing application metric: {key}"
+    ],
+)
+def test_application_metrics_fields(metrics_payload: dict, field: str) -> None:
+    """Application section exposes expected fields."""
 
-    system = payload["system"]
-    for key in [
+    assert field in metrics_payload["application"], f"Missing application metric: {field}"
+
+
+@pytest.mark.api
+@pytest.mark.parametrize(
+    "field",
+    [
         "cpu_percent",
         "memory_percent",
         "memory_used_mb",
         "memory_total_mb",
         "disk_percent",
-    ]:
-        assert key in system, f"Missing system metric: {key}"
+    ],
+)
+def test_system_metrics_fields(metrics_payload: dict, field: str) -> None:
+    """System section exposes expected fields."""
+
+    assert field in metrics_payload["system"], f"Missing system metric: {field}"
+
+
+@pytest.mark.api
+def test_total_requests_increments(client: TestClient, metrics_payload: dict) -> None:
+    """Total request counter increments on each call."""
 
     second_response = client.get("/api/v1/metrics")
     assert second_response.status_code == 200
@@ -44,6 +67,9 @@ def test_metrics_structure(client: TestClient):
     second_payload = second_response.json()
     assert (
         second_payload["application"]["total_requests"]
-        == application["total_requests"] + 1
+        == metrics_payload["application"]["total_requests"] + 1
     )
-    assert second_payload["application"]["uptime_seconds"] >= application["uptime_seconds"]
+    assert (
+        second_payload["application"]["uptime_seconds"]
+        >= metrics_payload["application"]["uptime_seconds"]
+    )

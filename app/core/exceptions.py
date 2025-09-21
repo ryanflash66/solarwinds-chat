@@ -39,6 +39,13 @@ class VectorStoreError(SolarWindsChatbotException):
         super().__init__(message, details, status_code=503)
 
 
+class IndexingServiceError(SolarWindsChatbotException):
+    """Raised when the indexing service is unavailable or encounters errors."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message, details, status_code=503)
+
+
 class LLMProviderError(SolarWindsChatbotException):
     """Raised when LLM provider operations fail."""
 

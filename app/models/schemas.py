@@ -21,10 +21,9 @@ class ChatRequest(BaseModel):
     @classmethod
     def validate_query(cls, value: str) -> str:
         """Ensure the query contains non-whitespace characters."""
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Query must contain non-whitespace characters.")
-        return cleaned
+        if cleaned := value.strip():
+            return cleaned
+        raise ValueError("Query must contain non-whitespace characters.")
 
 
 class SourceDoc(BaseModel):

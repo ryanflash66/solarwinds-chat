@@ -4,7 +4,11 @@ import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-from app.core.exceptions import VectorStoreError, EmbeddingError
+from app.core.exceptions import (
+    VectorStoreError,
+    EmbeddingError,
+    IndexingServiceError,
+)
 from app.core.logging import get_logger
 from app.models.schemas import SolutionRecord, SourceDoc
 from app.services.embedding import embedding_service
@@ -315,43 +319,75 @@ class IndexingService:
         Returns:
             List of source documents with similarity scores
         """
-        if not self._initialized:
-            await self.initialize()
-
-            if not self._initialized:
-                logger.warning(
-                    "Indexing service unavailable; returning empty search results",
-                    extra={"error": self._last_error},
-                )
-                return []
-
         if not query.strip():
             return []
 
+        await self.initialize()
+        if not self._initialized:
+            error_message = self._last_error or "Indexing service not initialized"
+            logger.error(
+                "Indexing service unavailable for search",
+                extra={"error": error_message},
+            )
+            raise IndexingServiceError(
+                "Indexing service unavailable",
+                details={
+                    "operation": "search_solutions",
+                    "error": error_message,
+                },
+            )
+
         try:
-            # Generate embedding for the query
-            query_embedding = await embedding_service.get_embedding(query.strip())
-            
-            # Search vector store
+            query_text = query.strip()
+            query_embedding = await embedding_service.get_embedding(query_text)
+
             results = await vector_store_service.search_similar(
                 query_embedding=query_embedding,
                 top_k=top_k,
                 category_filter=category_filter,
                 min_score=min_score
             )
-            
-            logger.info(f"Search completed", extra={
-                "query": query[:100] + "..." if len(query) > 100 else query,
+
+            truncated_query = (
+                f"{query_text[:100]}..." if len(query_text) > 100 else query_text
+            )
+            logger.info("Search completed", extra={
+                "query": truncated_query,
                 "results_count": len(results),
                 "top_k": top_k,
                 "category_filter": category_filter,
             })
-            
+
             return results
-            
-        except Exception as e:
-            logger.error(f"Error searching solutions: {str(e)}")
-            return []
+
+        except (EmbeddingError, VectorStoreError) as exc:
+            self._last_error = str(exc)
+            logger.exception(
+                "Dependency error during search_solutions",
+                extra={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "query": query,
+                },
+            )
+            raise
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.exception(
+                "Unexpected error during search_solutions",
+                extra={
+                    "query": query,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise IndexingServiceError(
+                "Failed to search solutions",
+                details={
+                    "operation": "search_solutions",
+                    "error": str(exc),
+                },
+            ) from exc
     
     async def get_solution_by_id(self, solution_id: str) -> Optional[SolutionRecord]:
         """
@@ -363,21 +399,49 @@ class IndexingService:
         Returns:
             Solution record if found, None otherwise
         """
+        await self.initialize()
         if not self._initialized:
-            await self.initialize()
-
-            if not self._initialized:
-                logger.warning(
-                    "Indexing service unavailable when fetching solution by ID",
-                    extra={"solution_id": solution_id, "error": self._last_error},
-                )
-                return None
+            error_message = self._last_error or "Indexing service not initialized"
+            logger.error(
+                "Indexing service unavailable when fetching solution by ID",
+                extra={"solution_id": solution_id, "error": error_message},
+            )
+            raise IndexingServiceError(
+                "Indexing service unavailable",
+                details={
+                    "operation": "get_solution_by_id",
+                    "solution_id": solution_id,
+                    "error": error_message,
+                },
+            )
 
         try:
             return await vector_store_service.get_solution_by_id(solution_id)
-        except Exception as e:
-            logger.error(f"Error getting solution by ID '{solution_id}': {str(e)}")
-            return None
+        except VectorStoreError as exc:
+            self._last_error = str(exc)
+            logger.exception(
+                "Vector store error retrieving solution by ID",
+                extra={"solution_id": solution_id},
+            )
+            raise
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.exception(
+                "Unexpected error retrieving solution by ID",
+                extra={
+                    "solution_id": solution_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise IndexingServiceError(
+                "Failed to retrieve solution",
+                details={
+                    "operation": "get_solution_by_id",
+                    "solution_id": solution_id,
+                    "error": str(exc),
+                },
+            ) from exc
     
     async def get_index_stats(self) -> Dict[str, Any]:
         """
@@ -387,30 +451,30 @@ class IndexingService:
             Dictionary with index statistics
         """
         try:
-            stats = {}
-            
-            if self._initialized:
-                vector_stats = await vector_store_service.get_collection_stats()
-                embedding_info = await embedding_service.get_service_info()
-
-                stats = {
-                    "initialized": True,
-                    "vector_store": vector_stats,
-                    "embedding_service": embedding_info,
-                }
-            else:
-                stats = {
+            if not self._initialized:
+                return {
                     "initialized": False,
                     "error": self._last_error or "Service not initialized",
                 }
 
-            return stats
+            vector_stats = await vector_store_service.get_collection_stats()
+            embedding_info = await embedding_service.get_service_info()
 
-        except Exception as e:
-            logger.error(f"Error getting index stats: {str(e)}")
+            return {
+                "initialized": True,
+                "vector_store": vector_stats,
+                "embedding_service": embedding_info,
+            }
+
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.exception(
+                "Error getting index stats",
+                extra={"error": str(exc), "error_type": type(exc).__name__},
+            )
             return {
                 "initialized": self._initialized,
-                "error": str(e),
+                "error": str(exc),
                 "last_error": self._last_error,
             }
     

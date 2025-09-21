@@ -7,7 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings."""
+    """Application settings.
+
+    The defaults favor the OpenRouter LLM provider and OpenAI embeddings for a
+    fully hosted experience. Override any field via environment variables when
+    working with local providers to preserve existing development workflows.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -78,11 +83,4 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
-# Create settings with explicit environment variables for development
-import os
-os.environ.setdefault('DEBUG', 'false')
-os.environ.setdefault('LLM_PROVIDER', 'openrouter')
-os.environ.setdefault('EMBEDDING_PROVIDER', 'openai')
-os.environ.setdefault('REDIS_ENABLED', 'false')
-
 settings = Settings()

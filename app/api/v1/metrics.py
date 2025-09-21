@@ -1,5 +1,6 @@
 """Metrics endpoints for monitoring and observability."""
 
+import asyncio
 import time
 from datetime import datetime
 from typing import Any, Dict
@@ -57,6 +58,21 @@ class MetricsResponse(BaseModel):
 # Store application start time for uptime calculation
 _start_time = time.time()
 _total_requests = 0
+_request_counter_lock: asyncio.Lock | None = None
+
+
+async def _increment_request_count() -> int:
+    """Increment the total request counter in a thread-safe manner."""
+
+    global _total_requests
+    global _request_counter_lock
+
+    if _request_counter_lock is None:
+        _request_counter_lock = asyncio.Lock()
+
+    async with _request_counter_lock:
+        _total_requests += 1
+        return _total_requests
 
 
 @router.get(
@@ -74,10 +90,8 @@ async def get_metrics() -> MetricsResponse:
         ApplicationMetrics: Current application and system metrics
     """
     current_time = time.time()
-    global _total_requests
-
     uptime = current_time - _start_time
-    _total_requests += 1
+    total_requests = await _increment_request_count()
     
     # Get system metrics
     cpu_percent = psutil.cpu_percent(interval=0.1)
@@ -94,7 +108,7 @@ async def get_metrics() -> MetricsResponse:
 
     application_metrics = ApplicationSection(
         uptime_seconds=uptime,
-        total_requests=_total_requests,
+        total_requests=total_requests,
         active_connections=0,
         version="1.0.0",
         environment="development" if settings.debug else "production",
@@ -107,7 +121,7 @@ async def get_metrics() -> MetricsResponse:
         "cpu_percent": cpu_percent,
         "memory_percent": memory.percent,
         "uptime_seconds": uptime,
-        "total_requests": _total_requests,
+        "total_requests": total_requests,
     })
 
     return MetricsResponse(
