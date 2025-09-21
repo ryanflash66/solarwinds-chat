@@ -1,7 +1,21 @@
 """Tests for the metrics endpoint."""
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
+
+import app.api.v1.metrics as metrics_module
+from app.api.v1.metrics import get_uptime_seconds, reset_metrics_state
+
+
+@pytest.fixture(autouse=True)
+def reset_metrics_globals() -> None:
+    """Ensure metrics module state is reset before and after each test."""
+
+    reset_metrics_state()
+    yield
+    reset_metrics_state()
 
 
 @pytest.fixture()
@@ -73,3 +87,22 @@ def test_total_requests_increments(client: TestClient, metrics_payload: dict) ->
         second_payload["application"]["uptime_seconds"]
         >= metrics_payload["application"]["uptime_seconds"]
     )
+
+
+@pytest.mark.api
+def test_metrics_uptime_resets_on_reset_metrics_state() -> None:
+    """Ensure uptime and start time update when metrics state resets."""
+
+    time.sleep(0.1)
+    uptime_before = get_uptime_seconds()
+    start_time_before = metrics_module._start_time
+
+    reset_metrics_state()
+
+    uptime_after = get_uptime_seconds()
+    start_time_after = metrics_module._start_time
+
+    assert uptime_after < 0.05, f"Uptime after reset should be near zero, got {uptime_after}"
+    assert (
+        start_time_after > start_time_before
+    ), "_start_time should be updated after reset"
