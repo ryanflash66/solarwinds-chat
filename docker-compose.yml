@@ -103,6 +103,21 @@ services:
       - solarwinds-network
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: solarwinds-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - frontend
+    restart: unless-stopped
+    networks:
+      - solarwinds-network
+
 volumes:
   chroma-data:
     driver: local
