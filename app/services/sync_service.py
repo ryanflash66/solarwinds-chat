@@ -28,6 +28,7 @@ class SyncStateManager:
         self.state_key = "solarwinds:sync_state"
         self.lock_key = "solarwinds:sync_lock"
         self.stats_key = "solarwinds:sync_stats"
+        self._local_lock_held = False
         
     async def connect(self) -> None:
         """Connect to Redis."""
@@ -90,8 +91,11 @@ class SyncStateManager:
             True if lock acquired, False otherwise
         """
         if not self.redis_client:
-            return True  # Allow sync if Redis unavailable
-            
+            if self._local_lock_held:
+                return False
+            self._local_lock_held = True
+            return True
+
         try:
             result = await self.redis_client.set(
                 self.lock_key,
@@ -107,6 +111,7 @@ class SyncStateManager:
     async def release_sync_lock(self) -> None:
         """Release the sync lock."""
         if not self.redis_client:
+            self._local_lock_held = False
             return
             
         try:
@@ -117,7 +122,7 @@ class SyncStateManager:
     async def is_sync_in_progress(self) -> bool:
         """Check if sync is currently in progress."""
         if not self.redis_client:
-            return False
+            return self._local_lock_held
             
         try:
             return bool(await self.redis_client.exists(self.lock_key))
