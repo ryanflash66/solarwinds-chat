@@ -24,9 +24,7 @@ class Settings(BaseSettings):
     # API Settings  
     api_v1_prefix: str = Field(default="/api/v1", description="API v1 prefix")
     cors_origins: list[str] = Field(default=[
-        "http://localhost:3000",      # Next.js (original plan)
-        "http://localhost:8501",      # Streamlit local development
-        "https://*.streamlit.app"     # Streamlit Cloud deployment
+        "http://localhost:8501",
     ], description="CORS allowed origins")
 
     # SolarWinds API Settings
@@ -75,13 +73,9 @@ class Settings(BaseSettings):
     
     # Security Settings
     allowed_hosts: list[str] = Field(default=["*"], description="Allowed hosts")
+    api_key: Optional[str] = Field(default=None, description="API key for request authentication")
+    rate_limit_per_minute: int = Field(default=60, description="Max API requests per minute per client")
 
 
 # Global settings instance
-# Create settings with explicit environment variables for development
-import os
-os.environ.setdefault('DEBUG', 'true')
-os.environ.setdefault('LLM_PROVIDER', 'ollama')
-os.environ.setdefault('EMBEDDING_PROVIDER', 'local')
-
 settings = Settings()

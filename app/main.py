@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -11,7 +11,9 @@ from app.api.v1.health import router as health_router
 from app.api.v1.chat import router as chat_router
 from app.api.v1.solutions import router as solutions_router
 from app.api.v1.metrics import router as metrics_router
+from app.core.auth import require_api_key
 from app.core.config import settings
+from app.core.rate_limit import rate_limiter
 from app.core.exceptions import SolarWindsChatbotException
 from app.core.logging import setup_logging, get_logger
 from app.services.sync_service import sync_service
@@ -92,6 +94,16 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
     
+    # Security headers middleware
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next) -> Response:  # type: ignore[type-arg]
+        response: Response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
@@ -100,30 +112,36 @@ def create_application() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
-    # Include routers
+
+    # Shared auth + rate-limit dependencies for protected routers
+    _protected = [Depends(require_api_key), Depends(rate_limiter)]
+
+    # Include routers — health stays unauthenticated for Docker healthchecks
     app.include_router(
         health_router,
         prefix=settings.api_v1_prefix,
         tags=["health"],
     )
-    
+
     app.include_router(
         chat_router,
         prefix=settings.api_v1_prefix,
         tags=["chat"],
+        dependencies=_protected,
     )
-    
+
     app.include_router(
         solutions_router,
         prefix=settings.api_v1_prefix,
         tags=["solutions"],
+        dependencies=_protected,
     )
-    
+
     app.include_router(
         metrics_router,
         prefix=settings.api_v1_prefix,
         tags=["metrics"],
+        dependencies=_protected,
     )
     
     return app
