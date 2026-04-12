@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.config import settings
@@ -71,7 +72,7 @@ async def health_check() -> HealthResponse:
     
     try:
         from app.services.sync_service import sync_service
-        sync_status = sync_service.get_sync_status()
+        sync_status = await sync_service.get_sync_status()
         components["sync_service"] = {"status": "healthy", "message": "Sync service operational"}
     except Exception as e:
         components["sync_service"] = {"status": "unhealthy", "message": f"Sync service error: {str(e)}"}
@@ -86,13 +87,19 @@ async def health_check() -> HealthResponse:
     except Exception as e:
         components["solarwinds"] = {"status": "unhealthy", "message": f"SolarWinds error: {str(e)}"}
     
+    # Derive overall status from component states
+    overall_status = "healthy"
+    if any(c.get("status") == "unhealthy" for c in components.values()):
+        overall_status = "degraded"
+
     logger.info("Health check requested", extra={
         "uptime_seconds": uptime,
-        "components": len(components)
+        "components": len(components),
+        "overall_status": overall_status,
     })
-    
+
     return HealthResponse(
-        status="healthy",
+        status=overall_status,
         timestamp=datetime.utcnow(),
         version="1.0.0",
         environment="development" if settings.debug else "production",
@@ -107,14 +114,27 @@ async def health_check() -> HealthResponse:
     summary="Readiness Check",
     description="Returns readiness status for load balancer health checks",
 )
-async def readiness_check() -> Dict[str, str]:
+async def readiness_check():
     """
     Perform a readiness check for Kubernetes/container orchestration.
-    
-    Returns:
-        Dict[str, str]: Simple ready status
+
+    Verifies that critical dependencies (indexing service) are healthy
+    before accepting traffic.
     """
     logger.debug("Readiness check requested")
+    try:
+        from app.services.indexing_service import indexing_service
+        health = await indexing_service.health_check()
+        if not health.get("healthy", False):
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready"},
+            )
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready"},
+        )
     return {"status": "ready"}
 
 
