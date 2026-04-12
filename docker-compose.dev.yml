@@ -8,6 +8,8 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
+    ports:
+      - "8000:8000"
     environment:
       - DEBUG=true
       - LOG_LEVEL=DEBUG
@@ -17,12 +19,24 @@ services:
       - .:/app  # Mount source code for live reloading
       - /app/.venv  # Exclude virtual environment from mount
     command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-    
-  # Development overrides for frontend service  
+
+  # Development overrides for frontend service
   frontend:
+    ports:
+      - "8501:8501"
     volumes:
       - .:/app
       - /app/.venv
     environment:
       - API_BASE_URL=http://api:8000
     command: ["python", "-m", "streamlit", "run", "streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true", "--server.fileWatcherType", "poll"]
+
+  # Development overrides for chromadb - expose port for direct access
+  chromadb:
+    ports:
+      - "8001:8000"
+
+  # Development overrides for redis - expose port for direct access
+  redis:
+    ports:
+      - "6379:6379"
