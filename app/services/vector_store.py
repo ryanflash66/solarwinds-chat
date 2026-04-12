@@ -10,6 +10,8 @@ import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.config import Settings as ChromaSettings
 
+from tenacity import retry, stop_after_attempt, wait_exponential
+
 from app.core.config import settings
 from app.core.exceptions import VectorStoreError
 from app.core.logging import get_logger
@@ -54,6 +56,7 @@ class VectorStoreService:
             logger.error(f"Failed to connect to Chroma: {str(e)}")
             raise VectorStoreError(f"Chroma connection failed: {str(e)}")
     
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=15))
     def _create_client(self) -> chromadb.ClientAPI:
         """Create Chroma client (sync operation)."""
         try:
@@ -63,7 +66,7 @@ class VectorStoreService:
                 port=settings.chroma_port,
                 settings=ChromaSettings(
                     anonymized_telemetry=False,
-                    allow_reset=True,
+                    allow_reset=False,
                 )
             )
             
@@ -80,7 +83,7 @@ class VectorStoreService:
                     path="./chroma_db",
                     settings=ChromaSettings(
                         anonymized_telemetry=False,
-                        allow_reset=True,
+                        allow_reset=False,
                     )
                 )
             except Exception as fallback_error:
