@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     response_timeout_seconds: int = Field(default=30, description="Response timeout in seconds")
     
     # Security Settings
+    api_key: Optional[str] = Field(default=None, description="API key for endpoint authentication (disabled when None)")
     allowed_hosts: list[str] = Field(default=["*"], description="Allowed hosts")
 
 
