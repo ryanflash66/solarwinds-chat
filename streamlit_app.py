@@ -3,6 +3,8 @@ SolarWinds IT Solutions Chatbot - Streamlit Frontend
 Helping IT staff resolve user issues quickly with AI-powered assistance.
 """
 
+import os
+
 import streamlit as st
 import requests
 import json
@@ -10,7 +12,16 @@ import time
 from typing import Dict, Any, List, Optional
 
 # Configuration
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+API_KEY = os.environ.get("API_KEY", "")
+
+
+def _get_headers() -> dict:
+    """Get request headers including API key if configured."""
+    headers = {}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+    return headers
 
 # Page configuration
 st.set_page_config(
@@ -68,7 +79,7 @@ st.markdown("""
 def check_api_health() -> Dict[str, Any]:
     """Check the health of the FastAPI backend."""
     try:
-        response = requests.get(f"{API_BASE_URL}/api/v1/health", timeout=5)
+        response = requests.get(f"{API_BASE_URL}/api/v1/health", headers=_get_headers(), timeout=5)
         if response.status_code == 200:
             return response.json()
         else:
@@ -82,6 +93,7 @@ def send_chat_message(query: str) -> Dict[str, Any]:
         response = requests.post(
             f"{API_BASE_URL}/api/v1/chat",
             json={"query": query},
+            headers=_get_headers(),
             timeout=30
         )
         if response.status_code == 200:
@@ -107,6 +119,7 @@ def search_solutions(query: str, limit: int = 10) -> List[Dict[str, Any]]:
         response = requests.get(
             f"{API_BASE_URL}/api/v1/solutions/search",
             params={"q": query, "limit": limit},
+            headers=_get_headers(),
             timeout=10
         )
         if response.status_code == 200:
@@ -119,7 +132,7 @@ def search_solutions(query: str, limit: int = 10) -> List[Dict[str, Any]]:
 def get_system_metrics() -> Optional[Dict[str, Any]]:
     """Get system metrics from the FastAPI backend."""
     try:
-        response = requests.get(f"{API_BASE_URL}/api/v1/metrics", timeout=5)
+        response = requests.get(f"{API_BASE_URL}/api/v1/metrics", headers=_get_headers(), timeout=5)
         if response.status_code == 200:
             return response.json()
         else:
