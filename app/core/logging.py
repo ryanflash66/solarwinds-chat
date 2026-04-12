@@ -6,14 +6,20 @@ import sys
 from typing import Any, Dict
 
 from app.core.config import settings
+from app.core.middleware import RequestIDFilter
 
 
 def setup_logging() -> None:
     """Setup application logging configuration."""
-    
+
     logging_config: Dict[str, Any] = {
         "version": 1,
         "disable_existing_loggers": False,
+        "filters": {
+            "request_id": {
+                "()": RequestIDFilter,
+            },
+        },
         "formatters": {
             "default": {
                 "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -25,7 +31,7 @@ def setup_logging() -> None:
             },
             "json": {
                 "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
-                "format": "%(asctime)s %(name)s %(levelname)s %(pathname)s %(lineno)d %(message)s",
+                "format": "%(asctime)s %(name)s %(levelname)s %(pathname)s %(lineno)d %(message)s %(request_id)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },
@@ -33,7 +39,8 @@ def setup_logging() -> None:
             "console": {
                 "class": "logging.StreamHandler",
                 "level": settings.log_level,
-                "formatter": "detailed" if settings.debug else "default",
+                "formatter": "detailed" if settings.debug else "json",
+                "filters": ["request_id"],
                 "stream": sys.stdout,
             },
         },
