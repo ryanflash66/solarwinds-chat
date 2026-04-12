@@ -13,6 +13,7 @@ from app.api.v1.solutions import router as solutions_router
 from app.api.v1.metrics import router as metrics_router
 from app.core.auth import require_api_key
 from app.core.config import settings
+from app.core.middleware import RequestIDMiddleware
 from app.core.rate_limit import rate_limiter
 from app.core.exceptions import SolarWindsChatbotException
 from app.core.logging import setup_logging, get_logger
@@ -103,6 +104,9 @@ def create_application() -> FastAPI:
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return response
+
+    # Request correlation ID middleware
+    app.add_middleware(RequestIDMiddleware)
 
     # CORS middleware
     app.add_middleware(
